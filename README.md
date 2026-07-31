@@ -8,10 +8,43 @@ like AZ-104 can be added later with no schema change — see "Data model" below)
 
 - Java 21, Spring Boot 3.5.x, Maven
 - Spring Web, Spring Data JPA, PostgreSQL, Flyway, Bean Validation, Lombok, Actuator
-- Spring Data Redis (cache — see "Running locally" below)
-- Spring Cloud Azure Storage Blob (quiz result export — see "Running locally" below)
+- Spring Data Redis (cache - see "Running locally" below)
+- Spring Cloud Azure Storage Blob (quiz result export - see "Running locally" below)
 - springdoc-openapi (Swagger UI)
 - Tests: JUnit 5, Mockito, AssertJ
+
+## Application architecture
+
+The backend is the only component allowed to communicate with the data
+services. The Angular frontend calls its REST API over HTTPS and never connects
+directly to PostgreSQL, Redis, Storage or Key Vault.
+
+![Azure Quiz backend architecture](docs/application-architecture.png)
+
+The editable draw.io source is available at
+[`docs/application-architecture.drawio`](docs/application-architecture.drawio).
+
+Main runtime flow:
+
+```text
+Angular frontend (Azure Static Web Apps)
+                  |
+                  | HTTPS REST API
+                  v
+Spring Boot backend (Azure Linux Web App)
+                  |
+                  +--> PostgreSQL Flexible Server: persistent quiz data
+                  +--> Azure Managed Redis: application cache
+                  +--> Azure Storage: exported quiz results
+                  +--> Azure Key Vault: secrets and sensitive configuration
+```
+
+In Azure, the Web App uses VNet integration to reach data services through
+private endpoints and private DNS. Public access to those data services is
+disabled. The Web App uses a managed identity for Azure resource access.
+
+The complete infrastructure and its decisions are maintained in the
+`bilan-azure-terraform` repository.
 
 ## Running locally
 
@@ -72,6 +105,31 @@ Swagger UI: http://localhost:8080/swagger-ui.html
 ./mvnw test
 ```
 
+## Planned continuous deployment
+
+The backend delivery pipeline will be implemented with GitHub Actions. A change
+to the backend must follow this sequence:
+
+1. check out the signed commit;
+2. install Java 21 and restore Maven dependencies;
+3. run `./mvnw test`;
+4. build the application and its immutable container image;
+5. scan the source, dependencies, secrets and image;
+6. authenticate to Azure with GitHub OIDC, without a permanent client secret;
+7. push the image to Azure Container Registry;
+8. deploy that exact image to the non-production Azure Linux Web App;
+9. call `/actuator/health` and execute API smoke tests;
+10. mark the workflow as failed so developers can see and diagnose any error.
+
+Infrastructure is provisioned separately by Terraform. The application
+pipeline deploys code but must not create or modify shared infrastructure.
+Pre-production uses the same container and configuration model as production;
+only environment-specific values and secrets differ.
+
+This section documents the target workflow. The GitHub Actions workflow is not
+considered operational until its file, OIDC identity, protected environment and
+successful run have been added and verified.
+
 ## Environment variables (production)
 
 The `default` profile (active locally) defines a localhost datasource in `application.yml`. In production,
@@ -119,4 +177,3 @@ associated modules/questions (a dedicated Flyway migration, generated from the s
 
 - Provisioning Azure infrastructure (App Service, Static Web App, PostgreSQL Flexible Server)
 - Importing the real question content (supplied separately, converted into Flyway migrations).
-
