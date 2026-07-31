@@ -177,3 +177,17 @@ associated modules/questions (a dedicated Flyway migration, generated from the s
 
 - Provisioning Azure infrastructure (App Service, Static Web App, PostgreSQL Flexible Server)
 - Importing the real question content (supplied separately, converted into Flyway migrations).
+
+## Repository governance and security
+
+- commits are signed with SSH and must display the GitHub `Verified` badge;
+- root `CODEOWNERS` assigns the Java sources, Maven build, container image and
+  GitHub automation to `@hajarmezouar`;
+- Dependabot checks Maven, Docker and GitHub Actions dependencies weekly;
+- the `Security` workflow runs Trivy and Gitleaks on every push and pull
+  request.
+
+Trivy checks dependencies, the Dockerfile, secrets and configuration issues.
+Gitleaks scans the complete Git history. These controls do not depend on GitHub
+native secret scanning, whose availability can vary with repository visibility
+and the selected GitHub plan.
