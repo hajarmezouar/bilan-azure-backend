@@ -162,4 +162,5 @@ jobs:
 
       - name: Sign out from Azure
         if: always()
+        continue-on-error: true
         run: az logout
