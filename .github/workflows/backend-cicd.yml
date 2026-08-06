@@ -1,0 +1,165 @@
+name: Backend CI/CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-nonprod-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_REPOSITORY: azure-quiz-backend
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-test-scan:
+    name: Build, test and scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run backend tests
+        run: ./mvnw -B test
+
+      - name: Build immutable container image
+        run: docker build --tag "${IMAGE_REPOSITORY}:${IMAGE_TAG}" .
+
+      - name: Scan container image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          timeout: 15m0s
+
+      - name: Export reviewed container image
+        if: github.ref == 'refs/heads/main'
+        run: docker save "${IMAGE_REPOSITORY}:${IMAGE_TAG}" | gzip > backend-image.tar.gz
+
+      - name: Upload reviewed container image
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-image-${{ github.sha }}
+          path: backend-image.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+
+  deploy-nonprod:
+    name: Deploy non-production
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: build-test-scan
+    runs-on: ubuntu-latest
+    environment: nonprod
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download reviewed container image
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-image-${{ github.sha }}
+
+      - name: Load reviewed container image
+        run: gunzip --stdout backend-image.tar.gz | docker load
+
+      - name: Sign in to Azure with GitHub OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign in to Azure Container Registry
+        run: az acr login --name "${{ vars.AZURE_ACR_NAME }}"
+
+      - name: Push immutable image to Azure Container Registry
+        env:
+          ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+        run: |
+          LOGIN_SERVER="${ACR_NAME}.azurecr.io"
+          docker tag "${IMAGE_REPOSITORY}:${IMAGE_TAG}" "${LOGIN_SERVER}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+          docker push "${LOGIN_SERVER}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+
+      - name: Record current image for rollback
+        id: previous
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+        run: |
+          CURRENT_IMAGE=$(az webapp config container show \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${WEBAPP_NAME}" \
+            --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" \
+            --output tsv)
+          echo "image=${CURRENT_IMAGE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy immutable image to Azure Web App
+        env:
+          ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+        run: |
+          LOGIN_SERVER="${ACR_NAME}.azurecr.io"
+          az webapp config container set \
+            --resource-group "${RESOURCE_GROUP}" \
+            --name "${WEBAPP_NAME}" \
+            --container-image-name "${LOGIN_SERVER}/${IMAGE_REPOSITORY}:${IMAGE_TAG}" \
+            --container-registry-url "https://${LOGIN_SERVER}" \
+            --output none
+          az webapp restart --resource-group "${RESOURCE_GROUP}" --name "${WEBAPP_NAME}"
+
+      - name: Verify backend health
+        env:
+          WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+        run: |
+          HEALTH_URL="https://${WEBAPP_NAME}.azurewebsites.net/actuator/health"
+          for attempt in $(seq 1 30); do
+            STATUS=$(curl --silent --show-error --output health.json --write-out "%{http_code}" \
+              --max-time 15 "${HEALTH_URL}" || true)
+            if [ "${STATUS}" = "200" ]; then
+              cat health.json
+              echo "Backend is healthy at ${HEALTH_URL}" >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+            echo "Health check ${attempt}/30 returned HTTP ${STATUS}; retrying in 20 seconds."
+            sleep 20
+          done
+          echo "Backend did not become healthy: ${HEALTH_URL}" >&2
+          exit 1
+
+      - name: Publish deployment summary
+        if: always()
+        env:
+          ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+          WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+          PREVIOUS_IMAGE: ${{ steps.previous.outputs.image }}
+        run: |
+          {
+            echo "### Backend non-production deployment"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Image: \`${ACR_NAME}.azurecr.io/${IMAGE_REPOSITORY}:${IMAGE_TAG}\`"
+            echo "- Web App: https://${WEBAPP_NAME}.azurewebsites.net"
+            echo "- Previous image: \`${PREVIOUS_IMAGE:-none}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Sign out from Azure
+        if: always()
+        run: az logout

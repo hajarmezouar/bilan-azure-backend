@@ -19,11 +19,25 @@
 		<java.version>21</java.version>
 		<!-- Override Spring Boot's managed JDBC driver with the version fixing CVE-2026-54291. -->
 		<postgresql.version>42.7.12</postgresql.version>
+		<!-- Override Spring Boot's managed Netty release with the version fixing the 2026 DoS CVEs. -->
+		<netty.version>4.1.136.Final</netty.version>
 		<springdoc-openapi.version>2.8.17</springdoc-openapi.version>
 		<!-- AZURE -->
 		<spring-cloud-azure-dependencies.version>7.3.0</spring-cloud-azure-dependencies.version>
 		<azure-functions-maven-plugin.version>1.42.0</azure-functions-maven-plugin.version>
 	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>com.azure.spring</groupId>
+				<artifactId>spring-cloud-azure-dependencies</artifactId>
+				<version>${spring-cloud-azure-dependencies.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 
 	<dependencies>
 		<!-- ===================== Spring Boot ===================== -->
@@ -96,21 +110,10 @@
 		<!-- Autoconfigures a BlobServiceClient bean from spring.cloud.azure.storage.blob.*
 		     (application.yml): account-name + this Web App's managed identity in prod,
 		     a plain connection-string against local Azurite (docker-compose.yml) in dev.
-		     Version pinned explicitly to match spring-cloud-azure-dependencies below rather
-		     than relying on it: that BOM is imported as a plain dependency here, not inside
-		     dependencyManagement, where scope=import normally has no effect. Left as-is
-		     (pre-existing, unrelated to this change) rather than restructured. -->
+		     Versions are managed by the Spring Cloud Azure BOM above. -->
 		<dependency>
 			<groupId>com.azure.spring</groupId>
 			<artifactId>spring-cloud-azure-starter-storage-blob</artifactId>
-			<version>${spring-cloud-azure-dependencies.version}</version>
-		</dependency>
-		<dependency>
-			<groupId>com.azure.spring</groupId>
-			<artifactId>spring-cloud-azure-dependencies</artifactId>
-			<version>${spring-cloud-azure-dependencies.version}</version>
-			<type>pom</type>
-			<scope>import</scope>
 		</dependency>
 	</dependencies>
 
