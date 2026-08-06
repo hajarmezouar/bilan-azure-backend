@@ -145,8 +145,9 @@ deployment to the `main` branch, and configure these environment variables:
 | `AZURE_WEBAPP_NAME` | Terraform output `backend_github_actions.web_app_name` |
 
 These values are identifiers, not passwords. Azure trusts the workflow through
-the exact OIDC subject
-`repo:hajarmezouar/bilan-azure-backend:environment:nonprod`. No Azure client
+the exact OIDC subject emitted for this repository and its `nonprod`
+environment. In this organization, that subject also contains GitHub's stable
+numeric owner and repository identifiers. No Azure client
 secret, publish profile or ACR password is stored in GitHub.
 
 Images use the immutable Git commit SHA as their tag. The workflow records the
