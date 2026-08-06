@@ -105,10 +105,10 @@ Swagger UI: http://localhost:8080/swagger-ui.html
 ./mvnw test
 ```
 
-## Planned continuous deployment
+## Continuous deployment
 
-The backend delivery pipeline will be implemented with GitHub Actions. A change
-to the backend must follow this sequence:
+The backend delivery pipeline is implemented in
+`.github/workflows/backend-cicd.yml`. A change follows this sequence:
 
 1. check out the signed commit;
 2. install Java 21 and restore Maven dependencies;
@@ -126,9 +126,33 @@ pipeline deploys code but must not create or modify shared infrastructure.
 Pre-production uses the same container and configuration model as production;
 only environment-specific values and secrets differ.
 
-This section documents the target workflow. The GitHub Actions workflow is not
-considered operational until its file, OIDC identity, protected environment and
-successful run have been added and verified.
+Pull requests execute the build, tests and image scan without receiving Azure
+permissions. Deployment runs only from `main` and uses the protected GitHub
+environment `nonprod`.
+
+### GitHub environment configuration
+
+Create the `nonprod` environment under **Settings > Environments**, restrict
+deployment to the `main` branch, and configure these environment variables:
+
+| Variable | Value source |
+|---|---|
+| `AZURE_CLIENT_ID` | Terraform output `backend_github_actions.client_id` |
+| `AZURE_TENANT_ID` | Terraform output `backend_github_actions.tenant_id` |
+| `AZURE_SUBSCRIPTION_ID` | Terraform output `backend_github_actions.subscription_id` |
+| `AZURE_RESOURCE_GROUP` | Terraform output `backend_github_actions.resource_group_name` |
+| `AZURE_ACR_NAME` | Terraform output `backend_github_actions.container_registry` |
+| `AZURE_WEBAPP_NAME` | Terraform output `backend_github_actions.web_app_name` |
+
+These values are identifiers, not passwords. Azure trusts the workflow through
+the exact OIDC subject
+`repo:hajarmezouar/bilan-azure-backend:environment:nonprod`. No Azure client
+secret, publish profile or ACR password is stored in GitHub.
+
+Images use the immutable Git commit SHA as their tag. The workflow records the
+previous Web App image in the GitHub job summary so it can be selected again
+for rollback. Infrastructure remains managed by Terraform; GitHub Actions owns
+only the deployed image tag.
 
 ## Environment variables (production)
 
