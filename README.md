@@ -1,218 +1,139 @@
-# azure-quiz-backend
+# Azure Quiz — Spring Boot Backend
 
-Spring Boot REST API for the Microsoft Azure certifications revision app (AZ-900 to start, other certifications
-like AZ-104 can be added later with no schema change — see "Data model" below).
+REST API for Azure Quiz. It provides certifications, modules, questions, quiz sessions and results to the Angular frontend.
 
+## Status
 
-## Stack
-
-- Java 21, Spring Boot 3.5.x, Maven
-- Spring Web, Spring Data JPA, PostgreSQL, Flyway, Bean Validation, Lombok, Actuator
-- Spring Data Redis (cache - see "Running locally" below)
-- Spring Cloud Azure Storage Blob (quiz result export - see "Running locally" below)
-- springdoc-openapi (Swagger UI)
-- Tests: JUnit 5, Mockito, AssertJ
+- API: [https://app-azure-quiz-backend-nonprod.azurewebsites.net](https://app-azure-quiz-backend-nonprod.azurewebsites.net)
+- Health: [`/actuator/health`](https://app-azure-quiz-backend-nonprod.azurewebsites.net/actuator/health)
+- GitHub Actions pipeline validated through tests, build, scans, ACR publication, Web App deployment and smoke tests.
+- Production image is immutable and tagged with the Git commit SHA.
 
 ## Application architecture
 
-The backend is the only component allowed to communicate with the data
-services. The Angular frontend calls its REST API over HTTPS and never connects
-directly to PostgreSQL, Redis, Storage or Key Vault.
-
 ![Azure Quiz backend architecture](docs/application-architecture.png)
 
-The editable draw.io source is available at
-[`docs/application-architecture.drawio`](docs/application-architecture.drawio).
-
-Main runtime flow:
+Editable source: [application-architecture.drawio](docs/application-architecture.drawio).
 
 ```text
-Angular frontend (Azure Static Web Apps)
-                  |
-                  | HTTPS REST API
-                  v
-Spring Boot backend (Azure Linux Web App)
-                  |
-                  +--> PostgreSQL Flexible Server: persistent quiz data
-                  +--> Azure Managed Redis: application cache
-                  +--> Azure Storage: exported quiz results
-                  +--> Azure Key Vault: secrets and sensitive configuration
+Angular / Azure Static Web Apps
+              |
+              | HTTPS REST API
+              v
+Spring Boot / Azure Linux Web App
+              |
+              +--> PostgreSQL: persistent data
+              +--> Redis: application cache
+              +--> Blob Storage: JSON result exports
+              +--> Key Vault: PostgreSQL and Redis secrets
 ```
 
-In Azure, the Web App uses VNet integration to reach data services through
-private endpoints and private DNS. Public access to those data services is
-disabled. The Web App uses a managed identity for Azure resource access.
+The backend is the only component allowed to access data services. In Azure, it uses VNet Integration, Private Endpoints and private DNS. Its managed identity avoids ACR and Storage keys in application configuration.
 
-The complete infrastructure and its decisions are maintained in the
-`bilan-azure-terraform` repository.
+The complete infrastructure is maintained in `bilan-azure-terraform`.
 
-## Running locally
+## Technology
 
-Prerequisites: JDK 21, Docker (Desktop or Engine) running.
+- Java 21 and Spring Boot 3.5;
+- Spring Web, Spring Data JPA and Bean Validation;
+- PostgreSQL and Flyway;
+- Spring Data Redis;
+- Azure Blob Storage;
+- Actuator and springdoc-openapi;
+- Maven, JUnit 5, Mockito and AssertJ;
+- multi-stage Docker image running as a non-root user.
 
-```bash
-./mvnw spring-boot:run    # starts the API on http://localhost:8080
-```
+## Run locally
 
-That's it — a plain `./mvnw spring-boot:run`, or hitting "Run" on `AzureQuizBackendApplication` in
-your IDE, is enough on its own. The `spring-boot-docker-compose` dependency (pom.xml) detects
-`docker-compose.yml` at the project root and automatically starts Postgres + Redis + Azurite (a
-local Azure Blob Storage emulator) for you before the app context loads, then stops them when the
-app stops — no manual `docker compose up -d` step. It's marked `optional`, so it never ships in the
-production jar deployed to Azure App Service; this convenience is dev-only.
-
-If you'd rather manage the containers yourself (e.g. keep them running across multiple app restarts
-instead of stopping them every time), that still works exactly as before:
+Prerequisites: JDK 21 and Docker.
 
 ```bash
-docker compose up -d      # starts Postgres + Redis + Azurite (see docker-compose.yml)
 ./mvnw spring-boot:run
 ```
 
-Flyway applies the migrations (`src/main/resources/db/migration`) on startup, including the real content for
-AZ-900 modules 1 to 6 (`V2` to `V7`, 45 questions per module: 30 standard questions + 15 scenario questions).
-The 30 standard questions per module come from the trainer's answer key; the 15 scenario questions have no
-written answer key (the trainer corrects them live) — their answers were determined from AZ-900 fundamentals
-and deserve a quick review before use in training. One inconsistency was found and fixed in the trainer's
-answer key: Module 1 Q8 marked "SaaS" as the answer while the explanation clearly describes PaaS — the
-objectively correct answer (PaaS) was imported.
+Spring Boot Docker Compose automatically starts PostgreSQL, Redis and Azurite from `docker-compose.yml`. The API runs on `http://localhost:8080`, and Swagger UI is available at `http://localhost:8080/swagger-ui.html`.
 
-Six official mock exams (`V9` to `V14`, AZ900_Test_A to F, 50 questions each with answers/explanations
-included in the same source document) are imported as modules of type `MOCK_EXAM` (`type` column on
-`module`, migration `V8`). They stay strictly independent from each other and from course modules: the
-random exam mode (`EXAM`) only draws from modules of type `CONTENT` (see
-`QuestionRepository.findRandomActiveByCertification`).
+To manage the containers manually:
 
-`docker-compose up -d` also starts a local Redis (no auth, plaintext) backing
-`CertificationService.getAllCertifications()` and `ModuleService.getModulesByCertification()`, both
-`@Cacheable` (see `CacheConfig` for why values are JSON-serialized rather than the JDK-serialization
-default). Entries expire after 30 minutes; there's no explicit eviction on writes, since the underlying
-data (certifications/modules) only ever changes via a new Flyway migration, not through the running app.
+```bash
+docker compose up -d
+./mvnw spring-boot:run
+```
 
-Every call to `GET /api/quiz-sessions/{sessionId}/result` also exports that result as a JSON blob
-(`QuizResultExportService`), downloadable again through `GET /api/quiz-sessions/{sessionId}/result/export`
-— the simplest concrete use of the Storage Account provisioned for this TP. Locally this goes to Azurite;
-in prod, to the `java-uploads-<owner>` container (Terraform's `storage-java.tf`), authenticated via this
-Web App's managed identity, no account key involved either way (`shared_access_key_enabled = false` on
-the account). A Storage outage never breaks the quiz itself — the export failing is only logged, not
-thrown; Postgres stays the source of truth for results.
-
-Swagger UI: http://localhost:8080/swagger-ui.html
-
-## Tests
+Run tests only:
 
 ```bash
 ./mvnw test
 ```
 
-## Continuous deployment
+## Data and behavior
 
-The backend delivery pipeline is implemented in
-`.github/workflows/backend-cicd.yml`. A change follows this sequence:
+Flyway creates the schema and loads certifications, modules and questions at startup. PostgreSQL remains the source of truth. Redis caches certifications and modules for 30 minutes.
 
-1. check out the signed commit;
-2. install Java 21 and restore Maven dependencies;
-3. run `./mvnw test`;
-4. build the application and its immutable container image;
-5. scan the source, dependencies, secrets and image;
-6. authenticate to Azure with GitHub OIDC, without a permanent client secret;
-7. push the image to Azure Container Registry;
-8. deploy that exact image to the non-production Azure Linux Web App;
-9. call `/actuator/health` and execute API smoke tests;
-10. mark the workflow as failed so developers can see and diagnose any error.
+Reading a quiz result also exports a JSON document to the `application-files` Blob container. A Storage failure is logged but does not prevent the quiz from completing.
 
-Infrastructure is provisioned separately by Terraform. The application
-pipeline deploys code but must not create or modify shared infrastructure.
-Pre-production uses the same container and configuration model as production;
-only environment-specific values and secrets differ.
+## Main API endpoints
 
-Pull requests execute the build, tests and image scan without receiving Azure
-permissions. Deployment runs only from `main` and uses the protected GitHub
-environment `nonprod`.
+- `GET /api/certifications`
+- `GET /api/certifications/{certificationId}/modules`
+- `POST /api/quiz-sessions`
+- `POST /api/quiz-sessions/{sessionId}/questions/{questionId}/answer`
+- `GET /api/quiz-sessions/{sessionId}/result`
+- `GET /api/quiz-sessions/{sessionId}/result/export`
 
-### GitHub environment configuration
+Question responses do not reveal the correct answer before submission.
 
-Create the `nonprod` environment under **Settings > Environments**, restrict
-deployment to the `main` branch, and configure these environment variables:
+## Azure configuration
 
-| Variable | Value source |
+Terraform injects the main settings into Azure Web App:
+
+| Variable | Purpose |
 |---|---|
-| `AZURE_CLIENT_ID` | Terraform output `backend_github_actions.client_id` |
-| `AZURE_TENANT_ID` | Terraform output `backend_github_actions.tenant_id` |
-| `AZURE_SUBSCRIPTION_ID` | Terraform output `backend_github_actions.subscription_id` |
-| `AZURE_RESOURCE_GROUP` | Terraform output `backend_github_actions.resource_group_name` |
-| `AZURE_ACR_NAME` | Terraform output `backend_github_actions.container_registry` |
-| `AZURE_WEBAPP_NAME` | Terraform output `backend_github_actions.web_app_name` |
-
-These values are identifiers, not passwords. Azure trusts the workflow through
-the exact OIDC subject emitted for this repository and its `nonprod`
-environment. In this organization, that subject also contains GitHub's stable
-numeric owner and repository identifiers. No Azure client
-secret, publish profile or ACR password is stored in GitHub.
-
-Images use the immutable Git commit SHA as their tag. The workflow records the
-previous Web App image in the GitHub job summary so it can be selected again
-for rollback. Infrastructure remains managed by Terraform; GitHub Actions owns
-only the deployed image tag.
-
-## Environment variables (production)
-
-The `default` profile (active locally) defines a localhost datasource in `application.yml`. In production,
-set these environment variables (e.g. Azure App Service) — they directly override the corresponding Spring
-properties, no extra profile needs activating:
-
-| Variable | Description |
-|---|---|
-| `SPRING_DATASOURCE_URL` | PostgreSQL JDBC URL, e.g. `jdbc:postgresql://<host>:5432/azurequiz` |
+| `SPRING_DATASOURCE_URL` | TLS connection to private PostgreSQL |
 | `SPRING_DATASOURCE_USERNAME` | PostgreSQL user |
-| `SPRING_DATASOURCE_PASSWORD` | PostgreSQL password |
-| `APP_CORS_ALLOWED_ORIGINS` | Allowed origin(s), e.g. the frontend Static Web App URL |
-| `REDIS_HOSTNAME` | Redis host, e.g. Azure Managed Redis's hostname |
-| `REDIS_PORT` | Redis port. Defaults to `6379` (docker-compose) locally; Azure Managed Redis exposes a different port, see the infra repo's `redis.tf` |
-| `REDIS_PASSWORD` | Redis access key. Empty locally (docker-compose's Redis has no auth) |
-| `REDIS_SSL_ENABLED` | `true` in prod (Azure Managed Redis requires TLS), `false` locally |
-| `BACKEND_API_KEY` | Shared secret the frontend must send as `X-Api-Key` (see `ApiKeyFilter`). Left unset locally — the check is skipped. In prod it's injected from Key Vault (see `app-service-java.tf` / `keyvault.tf` in the infra repo). |
-| `STORAGE_ACCOUNT_NAME` | Storage Account name. Authenticated via this Web App's managed identity (no key) — see `SPRING_PROFILES_ACTIVE` below for why |
-| `STORAGE_CONTAINER_NAME` | Blob container for quiz result exports, e.g. `java-uploads-<owner>` |
-| `SPRING_PROFILES_ACTIVE` | Set to `prod` by Terraform. Deactivates the `default` profile's local-only settings (localhost datasource, Azurite connection string) — without it, Blob Storage would try to reach a local Azurite that doesn't exist in Azure |
+| `SPRING_DATASOURCE_PASSWORD` | Key Vault secret reference |
+| `REDIS_HOSTNAME`, `REDIS_PORT` | Private Redis endpoint |
+| `REDIS_PASSWORD` | Key Vault secret reference |
+| `REDIS_SSL_ENABLED` | Enables Redis TLS |
+| `STORAGE_ACCOUNT_NAME` | Blob account accessed with managed identity |
+| `STORAGE_CONTAINER_NAME` | `application-files` container |
+| `APP_CORS_ALLOWED_ORIGINS` | Exact allowed frontend origin |
+| `SPRING_PROFILES_ACTIVE` | `prod` profile in Azure |
 
-## Data model
+No application secret is built into the Docker image.
 
-`certification` (e.g. AZ-900, AZ-104...) → `module` → `question` → `answer_option`. A quiz session
-(`quiz_session`) is tied to a certification and, in review mode, to a specific module; in exam mode,
-questions are drawn randomly from all active modules of the chosen certification.
+## CI/CD pipeline
 
-Adding a new certification requires no schema migration: just insert a row into `certification` and its
-associated modules/questions (a dedicated Flyway migration, generated from the supplied content).
+The [backend-cicd.yml](.github/workflows/backend-cicd.yml) workflow performs:
 
-## API contract
+1. Maven compilation and tests;
+2. Docker image build;
+3. source, dependency, secret and image scans;
+4. Azure authentication through GitHub OIDC;
+5. publication to `acrhmezouarquiznonprod` using the Git SHA as the tag;
+6. deployment of that exact image to Azure Linux Web App;
+7. `/actuator/health` verification and API smoke tests.
 
-- `GET /api/certifications` — list of available certifications
-- `GET /api/certifications/{certificationId}/modules` — modules of a certification, with active question count and `type` (`CONTENT` or `MOCK_EXAM`)
-- `POST /api/quiz-sessions` — creates a session
-  - `MODULE` mode: `{ "mode": "MODULE", "moduleId": "..." , "questionCount": 10 }` (`questionCount` optional, otherwise all active questions in the module)
-  - `EXAM` mode: `{ "mode": "EXAM", "certificationId": "...", "questionCount": 40 }` (`questionCount` optional, default 40)
-  - the response contains the questions and their options **without** indicating the correct answer
-- `POST /api/quiz-sessions/{sessionId}/questions/{questionId}/answer` — submits an answer, returns whether it's correct + the correct options + the explanation
-- `GET /api/quiz-sessions/{sessionId}/result` — final aggregated score for the session; also exports it as a JSON blob (see "Running locally")
-- `GET /api/quiz-sessions/{sessionId}/result/export` — downloads that exported blob (404 if `result` was never called for this session)
+Pull Requests build and test without Azure permissions. Deployment runs from `main` through the protected GitHub environment `nonprod`.
 
+Required GitHub environment variables:
 
-## Out of scope for this repo
+- `AZURE_CLIENT_ID`
+- `AZURE_TENANT_ID`
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_RESOURCE_GROUP`
+- `AZURE_ACR_NAME`
+- `AZURE_WEBAPP_NAME`
 
-- Provisioning Azure infrastructure (App Service, Static Web App, PostgreSQL Flexible Server)
-- Importing the real question content (supplied separately, converted into Flyway migrations).
+These are non-secret identifiers. The pipeline uses no client secret, publish profile or ACR password.
 
-## Repository governance and security
+## Governance and security
 
-- commits are signed with SSH and must display the GitHub `Verified` badge;
-- root `CODEOWNERS` assigns the Java sources, Maven build, container image and
-  GitHub automation to `@hajarmezouar`;
-- Dependabot checks Maven, Docker and GitHub Actions dependencies weekly;
-- the `Security` workflow runs Trivy and Gitleaks on every push and pull
-  request.
+- signed commits displayed as `Verified`;
+- ownership declared in `CODEOWNERS`;
+- Dependabot for Maven, Docker and GitHub Actions;
+- Trivy and Gitleaks on every push and Pull Request;
+- non-root runtime container;
+- protected `main` branch and deployment restricted to `nonprod`.
 
-Trivy checks dependencies, the Dockerfile, secrets and configuration issues.
-Gitleaks scans the complete Git history. These controls do not depend on GitHub
-native secret scanning, whose availability can vary with repository visibility
-and the selected GitHub plan.
+A failed test, scan, deployment or health check blocks the workflow and makes the problem visible in GitHub Actions.
