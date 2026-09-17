@@ -16,7 +16,7 @@ REST API for Azure Quiz. It provides certifications, modules, questions, quiz se
 Editable source: [application-architecture.drawio](docs/application-architecture.drawio).
 
 ```text
-Angular / Azure Static Web Apps
+Angular / Azure Linux Web App container
               |
               | HTTPS REST API
               v
@@ -110,11 +110,11 @@ The [backend-cicd.yml](.github/workflows/backend-cicd.yml) workflow performs:
 2. Docker image build;
 3. source, dependency, secret and image scans;
 4. Azure authentication through GitHub OIDC;
-5. publication to `acrhmezouarquiznonprod` using the Git SHA as the tag;
+5. publication to the ACR selected by the GitHub environment using the Git SHA as the tag;
 6. deployment of that exact image to Azure Linux Web App;
 7. `/actuator/health` verification and API smoke tests.
 
-Pull Requests build and test without Azure permissions. Deployment runs from `main` through the protected GitHub environment `nonprod`.
+Pull Requests build and test without Azure permissions. Pushes to `main` deploy `nonprod`; production is selected explicitly from **Actions > Backend CI/CD > Run workflow** with the protected GitHub environment `prod`.
 
 Required GitHub environment variables:
 
@@ -134,6 +134,6 @@ These are non-secret identifiers. The pipeline uses no client secret, publish pr
 - Dependabot for Maven, Docker and GitHub Actions;
 - Trivy and Gitleaks on every push and Pull Request;
 - non-root runtime container;
-- protected `main` branch and deployment restricted to `nonprod`.
+- protected `main` branch and environment-scoped deployments for `nonprod` and `prod`.
 
 A failed test, scan, deployment or health check blocks the workflow and makes the problem visible in GitHub Actions.

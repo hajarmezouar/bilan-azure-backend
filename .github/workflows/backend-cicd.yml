@@ -6,12 +6,20 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target deployment environment"
+        required: true
+        type: choice
+        options:
+          - nonprod
+          - prod
 
 permissions:
   contents: read
 
 concurrency:
-  group: backend-nonprod-${{ github.ref }}
+  group: backend-${{ inputs.environment || 'nonprod' }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -62,12 +70,12 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  deploy-nonprod:
-    name: Deploy non-production
+  deploy:
+    name: Deploy ${{ inputs.environment || 'nonprod' }}
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: build-test-scan
     runs-on: ubuntu-latest
-    environment: nonprod
+    environment: ${{ inputs.environment || 'nonprod' }}
     permissions:
       contents: read
       id-token: write
@@ -155,7 +163,7 @@ jobs:
           PREVIOUS_IMAGE: ${{ steps.previous.outputs.image }}
         run: |
           {
-            echo "### Backend non-production deployment"
+            echo "### Backend ${{ inputs.environment || 'nonprod' }} deployment"
             echo "- Commit: \`${GITHUB_SHA}\`"
             echo "- Image: \`${ACR_NAME}.azurecr.io/${IMAGE_REPOSITORY}:${IMAGE_TAG}\`"
             echo "- Web App: https://${WEBAPP_NAME}.azurewebsites.net"
