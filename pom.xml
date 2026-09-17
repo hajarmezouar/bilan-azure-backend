@@ -19,8 +19,10 @@
 		<java.version>21</java.version>
 		<!-- Override Spring Boot's managed JDBC driver with the version fixing CVE-2026-54291. -->
 		<postgresql.version>42.7.12</postgresql.version>
-		<!-- Override Spring Boot's managed Netty release with the version fixing the 2026 DoS CVEs. -->
-		<netty.version>4.1.136.Final</netty.version>
+		<!-- Fix CVE-2026-75595 while retaining the Netty 4.1 compatibility line. -->
+		<netty.version>4.1.137.Final</netty.version>
+		<!-- 10.1.58 was not released; 10.1.59 contains the security fixes detected by CI. -->
+		<tomcat.version>10.1.59</tomcat.version>
 		<springdoc-openapi.version>2.8.17</springdoc-openapi.version>
 		<!-- AZURE -->
 		<spring-cloud-azure-dependencies.version>7.3.0</spring-cloud-azure-dependencies.version>
