@@ -1,0 +1,37 @@
+name: Security - DAST
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  zap:
+    name: OWASP ZAP baseline scan
+    runs-on: ubuntu-latest
+    environment: nonprod
+
+    steps:
+      - name: Check target availability
+        env:
+          TARGET_URL: ${{ vars.BACKEND_URL }}
+        run: |
+          echo "Checking non-production backend availability..."
+          curl --fail \
+            --silent \
+            --show-error \
+            --retry 5 \
+            --retry-delay 10 \
+            "${TARGET_URL}/actuator/health"
+
+      - name: Run OWASP ZAP baseline scan
+        uses: zaproxy/action-baseline@6c5a007541891231cd9e0ddec25d4f25c59c9874
+        with:
+          target: ${{ vars.BACKEND_URL }}
+          allow_issue_writing: false
+          fail_action: false
+          artifact_name: zap-backend-report
