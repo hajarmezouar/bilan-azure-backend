@@ -2,7 +2,12 @@ name: Security - DAST
 
 on:
   workflow_dispatch:
-  push:
+
+  workflow_run:
+    workflows:
+      - "Backend CI/CD"
+    types:
+      - completed
     branches:
       - main
 
@@ -12,6 +17,13 @@ permissions:
 jobs:
   zap:
     name: OWASP ZAP baseline scan
+
+    # Automatic DAST runs only after Backend CI/CD succeeds.
+    # Manual workflow_dispatch runs are also allowed.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
     runs-on: ubuntu-latest
     environment: nonprod
 
@@ -29,7 +41,7 @@ jobs:
             "${TARGET_URL}/actuator/health"
 
       - name: Run OWASP ZAP baseline scan
-        uses: zaproxy/action-baseline@6c5a007541891231cd9e0ddec25d4f25c59c9874
+        uses: zaproxy/action-baseline@7c8b4c74092c4b57d6333ecbd7a3a6d0509b0e3e # v0.15.0
         with:
           target: ${{ vars.BACKEND_URL }}
           allow_issue_writing: false
