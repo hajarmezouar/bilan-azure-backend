@@ -104,17 +104,22 @@ No application secret is built into the Docker image.
 
 ## CI/CD pipeline
 
-The [backend-cicd.yml](.github/workflows/backend-cicd.yml) workflow performs:
+The `backend-cicd.yml` workflow validates and deploys the application:
 
-1. Maven compilation and tests;
+1. Maven compilation and unit tests;
 2. Docker image build;
-3. source, dependency, secret and image scans;
+3. publication of the reviewed image to Azure Container Registry;
 4. Azure authentication through GitHub OIDC;
-5. publication to the ACR selected by the GitHub environment using the Git SHA as the tag;
-6. deployment of that exact image to Azure Linux Web App;
-7. `/actuator/health` verification and API smoke tests.
+5. deployment of the exact Git-SHA-tagged image to Azure Linux Web App;
+6. `/actuator/health` verification and API smoke tests.
 
-Pull Requests build and test without Azure permissions. Pushes to `main` deploy `nonprod`; production is selected explicitly from **Actions > Backend CI/CD > Run workflow** with the protected GitHub environment `prod`.
+Pull Requests build and validate the application without Azure deployment permissions.
+
+Pushes to `main` deploy to `nonprod`. Production deployment is selected explicitly from **Actions > Backend CI/CD > Run workflow** and uses the protected GitHub environment `prod`.
+
+The deployed image is tagged with the Git commit SHA, providing traceability between the source revision, the ACR image and the version running in Azure.
+
+Post-deployment DAST is triggered only after a successful `Backend CI/CD` run. This prevents the dynamic scan from racing the Azure deployment or scanning a stopped/outdated application.
 
 Required GitHub environment variables:
 
@@ -125,15 +130,80 @@ Required GitHub environment variables:
 - `AZURE_ACR_NAME`
 - `AZURE_WEBAPP_NAME`
 
-These are non-secret identifiers. The pipeline uses no client secret, publish profile or ACR password.
+These are non-secret identifiers. GitHub authenticates to Azure through OIDC, so the pipeline does not store an Azure client secret, publish profile or ACR password.
 
-## Governance and security
+## DevSecOps and security
 
-- signed commits displayed as `Verified`;
-- ownership declared in `CODEOWNERS`;
-- Dependabot for Maven, Docker and GitHub Actions;
-- Trivy and Gitleaks on every push and Pull Request;
-- non-root runtime container;
-- protected `main` branch and environment-scoped deployments for `nonprod` and `prod`.
+Security controls are separated into five dedicated GitHub Actions workflows. Each workflow covers a different security category and exposes its result independently.
 
-A failed test, scan, deployment or health check blocks the workflow and makes the problem visible in GitHub Actions.
+| Category | Tool | Scope | Policy |
+| --- | --- | --- | --- |
+| SAST | SonarQube Cloud | Java / Spring Boot source code | Static analysis and Quality Gate |
+| SCA | Trivy | Maven dependencies | Fixable HIGH/CRITICAL vulnerabilities are blocking |
+| Secrets | Gitleaks | Repository and Git history | Detected secrets are blocking |
+| Container | Trivy | Docker image and configuration | HIGH/CRITICAL findings are blocking |
+| DAST | OWASP ZAP Baseline | Deployed nonprod API | Informational baseline |
+
+### SAST — SonarQube Cloud
+
+SonarQube Cloud performs static analysis of the Java/Spring Boot code.
+
+The workflow:
+
+1. builds the Maven project;
+2. executes the unit tests;
+3. generates a JaCoCo coverage report;
+4. sends the source analysis and coverage report to SonarQube Cloud.
+
+During the security review, SonarQube identified GitHub Actions referenced by mutable version tags. The affected actions were replaced with full commit SHA references.
+
+This provides a reproducible workflow definition and reduces the risk associated with a mutable third-party Action reference.
+
+The corrected workflow was then analyzed again through SonarQube Cloud.
+
+### SCA — Trivy
+
+Trivy performs Software Composition Analysis of the Maven dependencies.
+
+The workflow focuses its blocking policy on fixable `HIGH` and `CRITICAL` vulnerabilities.
+
+Vulnerabilities without an available upstream fix can still be reported, but they are not treated as immediately remediable failures.
+
+### Secret detection — Gitleaks
+
+Gitleaks scans the repository and its Git history for accidentally committed credentials, API keys, tokens and other secrets.
+
+The workflow checks the complete Git history rather than only the latest commit.
+
+A confirmed secret detection is considered blocking.
+
+### Container security — Trivy
+
+The production Docker image is analyzed by Trivy before deployment.
+
+The analysis covers:
+
+- operating-system packages;
+- application packages;
+- HIGH and CRITICAL vulnerabilities;
+- Docker and configuration security issues.
+
+The application container runs as a non-root user and contains no application credentials.
+
+### DAST — OWASP ZAP
+
+OWASP ZAP Baseline performs dynamic security testing against the deployed non-production backend.
+
+Unlike source-based scans, DAST requires a running application. It is therefore triggered only after a successful `Backend CI/CD` workflow:
+
+```text
+Backend CI/CD
+     |
+     v
+Deploy to Azure
+     |
+     v
+Health verification
+     |
+     v
+OWASP ZAP
