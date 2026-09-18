@@ -41,7 +41,7 @@ jobs:
             "${TARGET_URL}/actuator/health"
 
       - name: Run OWASP ZAP baseline scan
-        uses: zaproxy/action-baseline@7c8b4c74092c4b57d6333ecbd7a3a6d0509b0e3e # v0.15.0
+        uses: zaproxy/action-baseline@6c5a007541891231cd9e0ddec25d4f25c59c9874
         with:
           target: ${{ vars.BACKEND_URL }}
           allow_issue_writing: false
