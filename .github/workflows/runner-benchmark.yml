@@ -1,0 +1,74 @@
+name: Hosted vs self-hosted benchmark
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-benchmark
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    if: github.ref == 'refs/heads/main'
+    name: ${{ matrix.platform }} / ${{ matrix.workload }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        platform: [hosted, self-hosted]
+        workload: [maven, docker]
+    runs-on: ${{ fromJSON(matrix.platform == 'self-hosted' && '["self-hosted","linux","x64","azure-quiz"]' || '["ubuntu-24.04"]') }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Measure one cold and three warm executions
+        env:
+          BENCH_PLATFORM: ${{ matrix.platform }}
+          BENCH_WORKLOAD: ${{ matrix.workload }}
+        run: python3 scripts/benchmark-runner.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: benchmark-${{ matrix.platform }}-${{ matrix.workload }}
+          path: benchmark-results/*
+          if-no-files-found: error
+          retention-days: 30
+
+  report:
+    needs: measure
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: benchmark-*
+          path: measurements
+      - name: Collect job durations and generate report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -B scripts/test_report_benchmark.py
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > measurements/jobs.json
+          python3 scripts/report-benchmark.py measurements > measurements/report.md
+          cat measurements/report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: benchmark-report
+          path: measurements
+          retention-days: 30
