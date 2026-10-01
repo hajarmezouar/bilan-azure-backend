@@ -7,6 +7,7 @@ REST API for Azure Quiz. It provides certifications, modules, questions, quiz se
 - API: [https://app-azure-quiz-backend-nonprod.azurewebsites.net](https://app-azure-quiz-backend-nonprod.azurewebsites.net)
 - Health: [`/actuator/health`](https://app-azure-quiz-backend-nonprod.azurewebsites.net/actuator/health)
 - GitHub Actions pipeline validated through tests, build, scans, ACR publication, Web App deployment and smoke tests.
+- Main-branch builds can run on the dedicated Azure self-hosted runner; Pull Requests remain on GitHub-hosted runners.
 - Production image is immutable and tagged with the Git commit SHA.
 
 ## Application architecture
@@ -117,6 +118,8 @@ Pull Requests build and validate the application without Azure deployment permis
 
 Pushes to `main` deploy to `nonprod`. Production deployment is selected explicitly from **Actions > Backend CI/CD > Run workflow** and uses the protected GitHub environment `prod`.
 
+When the `USE_SELF_HOSTED_RUNNER` environment variable is `true`, non-PR builds from `main` require the labels `self-hosted`, `linux`, `x64` and `azure-quiz`. Deployment remains on a GitHub-hosted runner and continues to authenticate to Azure through OIDC. Set the variable to `false` before destroying or servicing the VM so new builds do not wait for an offline runner.
+
 The deployed image is tagged with the Git commit SHA, providing traceability between the source revision, the ACR image and the version running in Azure.
 
 Post-deployment DAST is triggered only after a successful `Backend CI/CD` run. This prevents the dynamic scan from racing the Azure deployment or scanning a stopped/outdated application.
@@ -131,6 +134,8 @@ Required GitHub environment variables:
 - `AZURE_WEBAPP_NAME`
 
 These are non-secret identifiers. GitHub authenticates to Azure through OIDC, so the pipeline does not store an Azure client secret, publish profile or ACR password.
+
+Runner selection and measured hosted/self-hosted comparisons are documented in [docs/self-hosted-runner.md](docs/self-hosted-runner.md).
 
 ## DevSecOps and security
 
