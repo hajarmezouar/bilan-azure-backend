@@ -27,6 +27,7 @@ RUN ./mvnw -B clean package -DskipTests
 # ── Runtime stage ────────────────────────────────────────────────────────────
 # JRE, not JDK -- smaller image, no compiler needed to run a prebuilt jar.
 FROM eclipse-temurin:21-jre-jammy
+RUN apt-get update \&\& apt-get upgrade -y \&\& rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Runs as non-root -- AKS's default Pod Security Standards (baseline/restricted,
