@@ -34,3 +34,7 @@ build/
 
 ### MacOs file ###
 .DS_Store
+
+# Local benchmark artifacts and Python bytecode
+benchmark-results/
+__pycache__/
