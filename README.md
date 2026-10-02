@@ -137,9 +137,9 @@ These are non-secret identifiers. GitHub authenticates to Azure through OIDC, so
 
 Runner selection and measured hosted/self-hosted comparisons are documented in [docs/self-hosted-runner.md](docs/self-hosted-runner.md).
 
-### Independent runner verification
+### Manual runner verification
 
-An evaluator with permission to run GitHub Actions can select **Actions > Runner smoke test > Run workflow** on `main`. The job requires the labels `self-hosted`, `linux`, `x64` and `azure-quiz`, verifies the runner identity and installed Java/Docker tools, runs the Maven tests, and builds the production container. It does not deploy to Azure and does not receive repository or environment secrets.
+The runner can be verified from **Actions > Runner smoke test > Run workflow** on `main`. The job requires the labels `self-hosted`, `linux`, `x64` and `azure-quiz`, verifies the runner identity and installed Java/Docker tools, runs the Maven tests, and builds the production container. It does not deploy to Azure and does not receive repository or environment secrets.
 
 ## DevSecOps and security
 
