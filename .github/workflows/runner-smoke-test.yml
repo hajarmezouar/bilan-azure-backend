@@ -1,0 +1,75 @@
+name: Runner smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-smoke-test
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate self-hosted runner
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, azure-quiz]
+    timeout-minutes: 20
+    env:
+      TEST_IMAGE: runner-smoke:${{ github.run_id }}
+    steps:
+      - name: Checkout trusted main branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify runner identity and tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = 'quiz-ci-runner'
+          test "$RUNNER_OS" = 'Linux'
+          test "$RUNNER_ARCH" = 'X64'
+          java -version
+          javac -version
+          docker version
+          docker info --format 'Docker server: {{.ServerVersion}}'
+
+      - name: Run application tests
+        id: maven
+        shell: bash
+        run: |
+          set -euo pipefail
+          started=$(date +%s)
+          ./mvnw -B -ntp test
+          echo "seconds=$(($(date +%s) - started))" >> "$GITHUB_OUTPUT"
+
+      - name: Build the production container
+        id: docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          started=$(date +%s)
+          docker build --tag "$TEST_IMAGE" .
+          echo "seconds=$(($(date +%s) - started))" >> "$GITHUB_OUTPUT"
+
+      - name: Publish verification summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '## Self-hosted runner verification'
+            echo "- Runner: \`$RUNNER_NAME\`"
+            echo "- OS / architecture: \`$RUNNER_OS / $RUNNER_ARCH\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Maven tests: success in ${{ steps.maven.outputs.seconds }} s"
+            echo "- Docker build: success in ${{ steps.docker.outputs.seconds }} s"
+            echo '- Azure deployment: not requested'
+            echo '- Repository secrets: not used'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove test image
+        if: always()
+        shell: bash
+        run: docker image rm --force "$TEST_IMAGE" 2>/dev/null || true
