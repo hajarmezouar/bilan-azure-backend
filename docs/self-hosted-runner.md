@@ -95,9 +95,9 @@ gh api repos/hajarmezouar/bilan-azure-backend/actions/runs/RUN_ID/jobs \
 
 The GitHub repository page under **Settings > Actions > Runners** provides the required visual evidence that `quiz-ci-runner` is online.
 
-## Evaluator smoke test
+## Manual verification
 
-The manual `Runner smoke test` workflow provides an independent, non-deploying verification path. A repository evaluator selects the `main` branch and clicks **Run workflow**. The job can start only on a runner matching `[self-hosted, linux, x64, azure-quiz]` and verifies:
+The manual `Runner smoke test` workflow provides an independent, non-deploying verification path. Select the `main` branch and click **Run workflow**. The job can start only on a runner matching `[self-hosted, linux, x64, azure-quiz]` and verifies:
 
 - the machine reports the expected runner name, OS and architecture;
 - Java, the Java compiler and Docker are available;
